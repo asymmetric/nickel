@@ -117,18 +117,19 @@ a
 Array (a -> Num) Array ({_ Num} -> Num)
 match a <: {_: Num}
 match a >: {foo : Num}
-{foo : Num} <: a <: {_: Num} => coherence of lower bounds + max of lower bounds inf (if it exists) + coherence of upper bounds
+{foo : Num} <: a <: {_: Num} => coherence of lower bounds + max of lower bounds
+inf (if it exists) + coherence of upper bounds
 ```
 
 ### Join
 
-```
+```nickel
 join : { instantiations } -> Maybe Type
 fst {foo = 1} {bar = 2}
 ```
 
-```
-join: find the min type inside the set
+```nickel
+join: find the max type inside the set
 is_sub without unification
 more involved join: {foo : Num} @+@ {bar : Num} => {_ : Num}
 ```
@@ -198,11 +199,6 @@ if b then 2 else "foo" # Fail
 
 Idea: take the approach of Parreaux. Record upper and lower bound of unification
 variables, and solve in phases.
-<<<<<<< HEAD
-1st phase : inequalities that comes down to unification.
-2nd phase : `?a >: _` -> unification: we never infer Dyn
-3rd phase : Only `Dyn >: ?a`. Either it's unsound, or we don't care.
-=======
 
 - 0th phase (_addendum after call w/ Richard_) solve `?a <: b` => unify right
   away? Just an optimization, probably. We may even unify right away for `?a <:
@@ -221,7 +217,13 @@ decompose `?a` further and proceed with solving other constraints. Examples:
     T2`
 - `?a <: Array T` => `?a := Array ?a1, ?a1 <: T`
 etc.
->>>>>>> 45f877f2 (Fix typo directory name, add notes)
+
+`?a <: b`
+
+`{l1: T, .., ln: T} <: {_ : T}`
+`T != a <: Dyn`
+
+`b </: Dyn`
 
 `Num -> forall a. t   ?= ?b -> ?c`: this may introduce forall on the left. What
 to do with this? We want to avoid having foralls being part of the subtyping
@@ -309,7 +311,7 @@ _d := forall a. (a -> a)
 
 ```math
 f : forall a. a -> a -> a
-let g = f {foo : Num} {_ : Num}
+let g = f {foo : Num, bar: PosNum} {_ : Num}
 
 _a >: {foo : _a}
 _a >: {_ : _b}
@@ -318,8 +320,6 @@ _a >: {_ : _b}
 So what to do when `_a >: { ... }` ?
 $\exists i . \forall j, t_j \lt t_i$
 
-<<<<<<< HEAD
-=======
 ```nickel
 min {foo : _a, bar: _c} {_ : _b}
 -> {_a, _c} <: _b
@@ -329,14 +329,10 @@ min _a _c ...
 
 ### QuickMin
 
->>>>>>> a09e9d53 (Typos/grammar)
 QuickMin: eliminate cases of Dyn.
 We would like to characterize what works: if there is no Dyn in code, it should
 be equivalent to unification.
 
-<<<<<<< HEAD
-What algorithm to use to do that? Causes unfications?
-=======
 What algorithm to use to do that? Causes unifications?
 
 We can use the meet-if-present algorithm. Conjecture: min of a set can be
@@ -397,4 +393,3 @@ Do we care?
 **No**, actually. The strategy is: upper bound `Dyn`, keep for the end. Any
 other inequality can be decomposed by decomposing the variable and applying the
 constraints.
->>>>>>> a09e9d53 (Typos/grammar)
