@@ -24,7 +24,7 @@ system in the future and maintaining the Nickel codebase. We already hit edge
 cases that led to unsatisfying [ad-hoc
 fixes](https://github.com/tweag/nickel/pull/586). The current implementation
 interleaves a number of different phases, which makes it harder to get into and
-to modify. Finally, a clean and well designed specification often leads to a
+to modify. Finally, a clean and well-designed specification often leads to a
 simpler implementation, by removing accumulations of ad-hoc treatments that
 become subsumed by a generic case.
 
@@ -35,21 +35,22 @@ well as implementations, some of them both cutting-edge and of industrial
 strength. For the purely static part, the ML languages family and their cousins
 (Haskell, OCaml, Scala, Purescript, etc.) has proved over time to be a solid and
 expressive foundation. The role of the static type system of Nickel is to be
-able to type various generic functions operating on primitive types, and to do
+able to type various generic functions operating on primitive types, and doing
 so doesn't seem to require new developments or very fancy types. The current
 implementation, which supports polymorphism and row polymorphism, appears to
 already cover most cases.
 
 However, the co-existence of statically typed code and dynamically typed code
-makes Nickel different from most of the aforementioned inspirations. While we
-often brand Nickel as a gradually typed language for simplicity, it isn't
-really, technically speaking. A cornerstone of _gradual type systems_, derived
-from the original work of Siek and Taha[^1], is to statically accept potentially
-unsafe conversions from and to the dynamic type `Dyn`, and more complex types
-with `Dyn` inside like converting `Dyn -> Num` to `Num -> Num`. Such compatible
-types are said to be _consistent_ with each others. These implicit conversions
-may or may not be guarded at runtime by a check (_sound_ vs _unsound_ gradual
-typing).
+makes Nickel different from most of the aforementioned inspirations. Nickel is
+indeed a gradually typed language.
+
+Note that there are different flavours of gradual typing. A cornerstone of
+_gradual type systems_ derived from the original work of Siek and Taha[^1] is to
+statically accept potentially unsafe conversions from and to the dynamic type
+`Dyn`, and more complex types with `Dyn` inside like converting `Dyn -> Num` to
+`Num -> Num`. Such compatible types are said to be _consistent_ with each
+others. These implicit conversions may or may not be guarded at runtime by a
+check (_sound_ vs _unsound_ gradual typing).
 
 ```nickel
 # If Nickel was gradually typed, this would be accepted
@@ -75,11 +76,11 @@ error: incompatible types
 ```
 
 A second — and directly related — peculiarity of Nickel are contract
-annotations. Gradually typed language usually uses run-time checks called
-_casts_ to validate the implicit conversions at runtime, but those casts are
-rarely part of the source language and rather an implementation device of the
-runtime system. Contract annotations are in some way a first-class version of
-the implicit casts of gradual typing. Thus, it is possible to make the previous
+annotations. Gradually typed languages _à la Siek and Taha_ usually use dynamic
+checks called _casts_ to validate the implicit conversions at runtime, but those
+casts are rarely part of the source language and rather an implementation
+device. Contract annotations are in some way a first-class version of the
+implicit casts of gradual typing. Thus, it is possible to make the previous
 example work in Nickel by manually adding a contract annotation which indicates
 what type the user expects the expression to be:
 
@@ -89,6 +90,9 @@ what type the user expects the expression to be:
   mixed : Dyn -> Num -> Num = fun x y => add (x | Num) (y + 1),
 }
 ```
+
+TypedRacket is another example a gradually typed language that departs from the
+original design and which requires explicit contract annotations.
 
 ### Summary
 
@@ -418,20 +422,20 @@ don't do deep instantiation or deep skolemization:
 
 ```nickel
 let foo : Dyn = null in
-let id : forall a. a -> a = fun x => x in
+let ids : Array (forall a. a -> a) = [fun x => x] in
 let concat : forall b. Array b -> Array b -> Array b = (@) in
 
-concat [id] [null]
+concat ids [null]
 ```
 
-In the QuickLook setting, when we see the argument `[id]`, we know that `b` must
-be instantiated with `forall a. a -> a`. This is not true here, as `b` could
-also be `Dyn` (and in this case, given the second argument, it should!). We
-can't delay solving constraints involving polymorphic function types as we could
-do with monomorphic types (in that case, just generating `?a >: forall a. a ->
-a` at the first argument without solving right away): when applying a function
-with type `?a`, we need to know if `?a` must be instantiated with an arrow or if
-it has potential heading `forall`s which need to be instantiated.
+In the QuickLook setting, when we see the argument `ids`, we know that `b`
+**must** be instantiated with `forall a. a -> a`. This is not true here, as `b`
+could also be `Dyn` (and in this case, given the second argument, it should!).
+We can't delay solving constraints involving polymorphic function types as we
+could do with monomorphic types (in that case, just generating `?a >: forall a.
+a -> a` at the first argument without solving right away): when applying a
+function with type `?a`, we need to know if `?a` must be instantiated with an
+arrow or if it has potential heading `forall`s which need to be instantiated.
 
 We may extend the QuickLook phase to also cover `Dyn`, but this needs more
 investigation. Another fix could be to make all type constructors invariant also
@@ -444,7 +448,7 @@ order to get rid of the casts).
 To sum up:
 
 - We only want to infer `Dyn` because of an explicit type annotation.
-- Polymorphism and subtyping interact in a non trivial way. It is not obvious
+- Polymorphism and subtyping interact in a non-trivial way. It is not obvious
    how to apply QuickLook in the presence of our proposed subtyping relation.
 
 Given that impredicativity looks complex to combine with subtyping, and isn't
@@ -466,14 +470,15 @@ The final proposal is a system that:
   constructors are invariant with respect to subtyping induced by polymorphism
 
 A declarative specification as well as a constraint-solving algorithm are
-provided in the file [type-system.pdf](./type-system.pdf).
+provided in this repository. See
+[specs/type-system](../spec/type-system/README.md)
 
 ## Alternatives
 
 ### No subtyping
 
 An obvious alternative is to abandon the idea of subtyping. From there we can
-either chose to follow the QuickLook approach, the Dunfield and Krishnaswami's
+either choose to follow the QuickLook approach, the Dunfield and Krishnaswami's
 one, or the restricted one described above (but without subtyping, of course).
 We will have to put up with adding contract annotations for `Dyn` and
 dictionaries.
@@ -483,7 +488,7 @@ dictionaries.
 Another middle-ground could be to only keep the dictionary part of the subtyping
 relation. Because it is then guarded by the `{_ : _}` type constructor, it
 doesn't interact with polymorphism (in that a polymorphic type can never be a
-subtype of anything). We lose the upcasts to `Dyn` but still improves on the
+subtype of anything). We lose the upcasts to `Dyn` but we still improve on the
 current situation for dictionaries.
 
 [^1]: [Gradual Typing for Functional Languages](http://scheme2006.cs.uchicago.edu/13-siek.pdf)
@@ -494,4 +499,4 @@ current situation for dictionaries.
   Polymorphism](https://arxiv.org/abs/1306.6032)
 [^4]: [This reddit
   discussion](https://www.reddit.com/r/haskell/comments/ujpzx3/was_simplified_subsumption_worth_it_for_industry/)
-  gather some of reactions of Haskell users to the removal of arrow subsumption
+  gather some reactions of Haskell users to the removal of arrow subsumption
