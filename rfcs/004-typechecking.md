@@ -91,8 +91,9 @@ what type the user expects the expression to be:
 }
 ```
 
-TypedRacket is another example a gradually typed language that departs from the
-original design and which requires explicit contract annotations.
+TypedRacket is an example of a gradually typed language that departs from the
+original design and which requires explicit contract annotations, as Nickel
+does.
 
 ### Summary
 
