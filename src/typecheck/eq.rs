@@ -43,9 +43,7 @@
 //! times. For anything more complex, we return false.
 
 use super::*;
-use crate::eval;
-use crate::term::UnaryOp;
-use std::cell::Ref;
+use crate::{eval, term::UnaryOp};
 
 /// The maximal number of variable links we want to unfold before abandoning the check. It should
 /// stay low, but has been fixed arbitrarily: feel fee to increase reasonably if it turns out
@@ -53,7 +51,9 @@ use std::cell::Ref;
 pub const MAX_GAS: u8 = 8;
 
 pub trait TermEnvironmentTrait {
-    fn get(&self, id: &Ident) -> Option<(Ref<'_, RichTerm>, Ref<'_, Self>)>;
+    fn get_map<F, T>(&self, id: &Ident, f: F) -> T
+    where
+        F: FnOnce(Option<(&RichTerm, &Self)>) -> T;
 }
 
 #[derive(PartialEq, Clone, Debug)]
@@ -66,25 +66,23 @@ impl TermEnvironment {
 }
 
 impl TermEnvironmentTrait for TermEnvironment {
-    fn get(&self, id: &Ident) -> Option<(Ref<'_, RichTerm>, Ref<'_, TermEnvironment>)> {
-        // Looks like the map does nothing, but by Rust magic it converts `Option<&(X, Y)>` to
-        // `Option<(&X, &Y)>`
-        self.0.get(id).map(|(id, rt)| (id, rt))
+    fn get_map<F, T>(&self, id: &Ident, f: F) -> T
+    where
+        F: FnOnce(Option<(&RichTerm, &TermEnvironment)>) -> T,
+    {
+        f(self.0.get(id).map(|(rt, env)| (rt, env)))
     }
 }
 
 impl TermEnvironmentTrait for eval::Environment {
-    fn get(&self, id: &Ident) -> Option<(&RichTerm, &eval::Environment)> {
-        use eval::{lazy::Thunk, Closure};
-        use std::cell::Ref;
-
-        self.get(id).map(Thunk::borrow).map(|closure_ref| Ref::map_split(
-        match self.get(id) {
-            Some(thunk) => {
-                let Closure {body, env} = *thunk.borrow();
-                Some((&body, &env))
-            }
-            None => None,
+    fn get_map<F, T>(&self, id: &Ident, f: F) -> T
+    where
+        F: FnOnce(Option<(&RichTerm, &eval::Environment)>) -> T,
+    {
+        if let Some(closure_ref) = self.get(id).map(eval::lazy::Thunk::borrow) {
+            f(Some((&closure_ref.body, &closure_ref.env)))
+        } else {
+            f(None)
         }
     }
 }
@@ -156,24 +154,24 @@ impl State {
 ///
 /// - `env`: an environment mapping variables to their definition (the second placeholder in a
 ///   `let _ = _ in _`)
-pub fn contract_eq(
+pub fn contract_eq<E: TermEnvironmentTrait>(
     var_uid: usize,
     t1: &RichTerm,
-    env1: &TermEnvironment,
+    env1: &E,
     t2: &RichTerm,
-    env2: &TermEnvironment,
+    env2: &E,
 ) -> bool {
     contract_eq_bounded(&mut State::new(var_uid), t1, env1, t2, env2)
 }
 
 /// Decide type equality on contracts in their respective environment and given the remaining gas
 /// `gas`.
-fn contract_eq_bounded(
+fn contract_eq_bounded<E: TermEnvironmentTrait>(
     state: &mut State,
     t1: &RichTerm,
-    env1: &TermEnvironment,
+    env1: &E,
     t2: &RichTerm,
-    env2: &TermEnvironment,
+    env2: &E,
 ) -> bool {
     use Term::*;
 
@@ -217,34 +215,38 @@ fn contract_eq_bounded(
         // if they have the same identifier: whatever global environment the term will be put in,
         // free variables are not redefined locally and will be bound to the same value in any case.
         (Var(id1), Var(id2)) => {
-            match (env1.0.get(id1), env2.0.get(id2)) {
-                (None, None) => id1 == id2,
-                (Some((t1, env1)), Some((t2, env2))) => {
-                    // We may end up using one more gas unit if gas was exactly 1. That is not very
-                    // important, and it's simpler to just ignore this case. We still return false
-                    // if gas was already at zero.
-                    let had_gas = state.use_gas();
-                    state.use_gas();
-                    had_gas && contract_eq_bounded(state, &t1, &env1, &t2, &env2)
-                }
-                _ => false,
-            }
+            env1.get_map(id1, |binding1| {
+                env2.get_map(id2, |binding2| {
+                    match (binding1, binding2) {
+                        (None, None) => id1 == id2,
+                        (Some((t1, env1)), Some((t2, env2))) => {
+                            // We may end up using one more gas unit if gas was exactly 1. That is not very
+                            // important, and it's simpler to just ignore this case. We still return false
+                            // if gas was already at zero.
+                            let had_gas = state.use_gas();
+                            state.use_gas();
+                            had_gas && contract_eq_bounded(state, t1, env1, t2, env2)
+                        }
+                        _ => false,
+                    }
+                })
+            })
         }
         (Var(id), _) => {
             state.use_gas()
-                && env1
-                    .0
-                    .get(id)
-                    .map(|(t1, env1)| contract_eq_bounded(state, &t1, &env1, t2, env2))
-                    .unwrap_or(false)
+                && env1.get_map(id, |binding| {
+                    binding
+                        .map(|(t1, env1)| contract_eq_bounded(state, t1, env1, t2, env2))
+                        .unwrap_or(false)
+                })
         }
         (_, Var(id)) => {
             state.use_gas()
-                && env2
-                    .0
-                    .get(id)
-                    .map(|(t2, env2)| contract_eq_bounded(state, t1, env1, &t2, &env2))
-                    .unwrap_or(false)
+                && env2.get_map(id, |binding| {
+                    binding
+                        .map(|(t2, env2)| contract_eq_bounded(state, t1, env1, t2, env2))
+                        .unwrap_or(false)
+                })
         }
         (Record(m1, attrs1), Record(m2, attrs2)) => {
             map_eq(contract_eq_bounded, state, m1, env1, m2, env2) && attrs1 == attrs2
@@ -304,16 +306,16 @@ fn contract_eq_bounded(
 }
 
 /// Compute the equality between two hashmaps holding either types or terms.
-fn map_eq<V, F>(
+fn map_eq<V, F, E>(
     mut f: F,
     state: &mut State,
     map1: &HashMap<Ident, V>,
-    env1: &TermEnvironment,
+    env1: &E,
     map2: &HashMap<Ident, V>,
-    env2: &TermEnvironment,
+    env2: &E,
 ) -> bool
 where
-    F: FnMut(&mut State, &V, &TermEnvironment, &V, &TermEnvironment) -> bool,
+    F: FnMut(&mut State, &V, &E, &V, &E) -> bool,
 {
     map1.len() == map2.len()
         && map1.iter().all(|(id, v1)| {
@@ -370,12 +372,12 @@ fn rows_as_set(ty: &TypeWrapper) -> Option<HashSet<Ident>> {
 /// all the rigid type variables encountered have been introduced by `type_eq_bounded` itself. This
 /// is why we don't need unique identifiers that are distinct from the one used during
 /// typechecking, and we can just start from `0`.
-fn type_eq_bounded(
+fn type_eq_bounded<E: TermEnvironmentTrait>(
     state: &mut State,
     ty1: &TypeWrapper,
-    env1: &TermEnvironment,
+    env1: &E,
     ty2: &TypeWrapper,
-    env2: &TermEnvironment,
+    env2: &E,
 ) -> bool {
     match (ty1, ty2) {
         (TypeWrapper::Concrete(s1), TypeWrapper::Concrete(s2)) => match (s1, s2) {

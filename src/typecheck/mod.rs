@@ -1116,7 +1116,7 @@ impl TypeWrapper {
     /// Create a TypeWrapper from a Types. Contracts are represented as the separate variant
     /// [`TypeWrapper::Contract`] which also stores a term environment, required for checking type
     /// equality involving contracts.
-    pub fn from_type(ty: Types, env: &TermEnvironment) -> Self {
+    pub fn from_type<E: TermEnvironmentTrait>(ty: Types, env: &E) -> Self {
         match ty.0 {
             AbsType::Flat(t) => TypeWrapper::Contract(t.clone(), env.clone()),
             ty => TypeWrapper::Concrete(ty.map(|ty_| Box::new(TypeWrapper::from_type(*ty_, env)))),
