@@ -45,11 +45,16 @@
 use super::*;
 use crate::eval;
 use crate::term::UnaryOp;
+use std::cell::Ref;
 
 /// The maximal number of variable links we want to unfold before abandoning the check. It should
 /// stay low, but has been fixed arbitrarily: feel fee to increase reasonably if it turns out
 /// legitimate type equalities between simple contracts are unduly rejected in practice.
 pub const MAX_GAS: u8 = 8;
+
+pub trait TermEnvironmentTrait {
+    fn get(&self, id: &Ident) -> Option<(Ref<'_, RichTerm>, Ref<'_, Self>)>;
+}
 
 #[derive(PartialEq, Clone, Debug)]
 pub struct TermEnvironment(pub GenericEnvironment<Ident, (RichTerm, TermEnvironment)>);
@@ -57,6 +62,30 @@ pub struct TermEnvironment(pub GenericEnvironment<Ident, (RichTerm, TermEnvironm
 impl TermEnvironment {
     pub fn new() -> Self {
         TermEnvironment(GenericEnvironment::new())
+    }
+}
+
+impl TermEnvironmentTrait for TermEnvironment {
+    fn get(&self, id: &Ident) -> Option<(Ref<'_, RichTerm>, Ref<'_, TermEnvironment>)> {
+        // Looks like the map does nothing, but by Rust magic it converts `Option<&(X, Y)>` to
+        // `Option<(&X, &Y)>`
+        self.0.get(id).map(|(id, rt)| (id, rt))
+    }
+}
+
+impl TermEnvironmentTrait for eval::Environment {
+    fn get(&self, id: &Ident) -> Option<(&RichTerm, &eval::Environment)> {
+        use eval::{lazy::Thunk, Closure};
+        use std::cell::Ref;
+
+        self.get(id).map(Thunk::borrow).map(|closure_ref| Ref::map_split(
+        match self.get(id) {
+            Some(thunk) => {
+                let Closure {body, env} = *thunk.borrow();
+                Some((&body, &env))
+            }
+            None => None,
+        }
     }
 }
 
